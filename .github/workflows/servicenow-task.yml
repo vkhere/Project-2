@@ -96,7 +96,7 @@ jobs:
           PAYLOAD=$(cat <<EOF
           {
             "short_description": "GitHub Commit by ${{ github.actor }} on repo vkhere/Project-2",
-            "description": "Commit Details:\n- Author: ${{ github.actor }}\n- Branch: ${{ github.ref_name }}\n- Commit SHA: ${{ github.sha }}\n- Message: ${{ github.event.head_commit.message }}\n- Timestamp: ${{ github.event.head_commit.timestamp }}\n- Repo: https://github.com/vkhere/Project-2",
+            "description": "Commit Details:\n- Author: ${{ github.actor }}\n- Branch: ${{ github.ref_name }}\n- Commit SHA: ${{ github.sha }}\n- Message: ${{ github.event.head_commit.message }}\n- Timestamp: ${{ github.event.head_commit.timestamp }}",
             "state": "1",
             "priority": "3",
             "comments": "Automatically created by GitHub Actions on push to vkhere/Project-2"
