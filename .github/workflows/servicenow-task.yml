@@ -40,22 +40,32 @@ jobs:
       # endpoint with a GET request just to verify credentials.
       # A 200 or 401 response tells us if the instance is awake.
       # ---------------------------------------------------------
-      - name: Verify ServiceNow Login
-        run: |
-          echo "Testing ServiceNow authentication..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --user "${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}" \
-            --header "Accept: application/json" \
-            "${{ secrets.SN_INSTANCE_URL }}/api/now/table/task?sysparm_limit=1")
-          echo "HTTP Status: $HTTP_STATUS"
-          if [ "$HTTP_STATUS" == "000" ]; then
-            echo "Instance is hibernating. Proceeding to wake-up step..."
-          elif [ "$HTTP_STATUS" == "401" ]; then
-            echo "ERROR: Invalid credentials. Check SN_USERNAME and SN_PASSWORD secrets."
-            exit 1
-          else
-            echo "Instance is reachable. HTTP Status: $HTTP_STATUS"
-          fi
+- name: Verify ServiceNow Login (DEBUG VERSION)
+  run: |
+    echo "🔍 Testing ServiceNow authentication..."
+    echo "Instance URL: ${{ secrets.SN_INSTANCE_URL }}"
+    
+    # Test the curl command with verbose output
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+      --user "${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}" \
+      --header "Accept: application/json" \
+      --verbose \
+      "${{ secrets.SN_INSTANCE_URL }}/api/now/table/task?sysparm_limit=1" \
+      2>&1 | grep -oP '(?<=HTTP/2 )[0-9]{3}')
+    
+    echo "🌐 HTTP Status Code: '$HTTP_STATUS'"
+    
+    if [ "$HTTP_STATUS" == "000" ] || [ -z "$HTTP_STATUS" ]; then
+      echo "⚠️ Instance is hibernating. Wake-up step will handle this..."
+    elif [ "$HTTP_STATUS" == "401" ]; then
+      echo "❌ ERROR: 401 Unauthorized - Check SN_USERNAME and SN_PASSWORD secrets"
+      exit 1
+    elif [ "$HTTP_STATUS" == "200" ] || [ "$HTTP_STATUS" == "201" ]; then
+      echo "✅ SUCCESS: ServiceNow is reachable!"
+    else
+      echo "⚠️ Unexpected status: $HTTP_STATUS"
+      exit 1
+    fi
 
       # ---------------------------------------------------------
       # STEP 3A — WAKE UP THE SERVICENOW INSTANCE
