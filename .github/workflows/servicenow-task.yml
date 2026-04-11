@@ -4,7 +4,7 @@
 #          a Task in ServiceNow with the commit details.
 # ============================================================
 
-name: ServiceNow Task on GitHub Push
+-name: ServiceNow Task on GitHub Push
 
 # ---------------------------------------------------------
 # STEP 1 — TRIGGER
