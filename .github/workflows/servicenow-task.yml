@@ -1,11 +1,14 @@
 # ============================================================
 # FILE: .github/workflows/servicenow-task.yml
-# PURPOSE: On every push to this repo, automatically create
-#          a Task in ServiceNow with the commit details.
+# PURPOSE: On every push to this repo, create Task in ServiceNow
 # ============================================================
 
--name: ServiceNow Task on GitHub Push
+name: ServiceNow Task on GitHub Push
 
+on:
+  push:
+    branches:
+      - main
 # ---------------------------------------------------------
 # STEP 1 — TRIGGER
 # This workflow runs automatically whenever a push is made
