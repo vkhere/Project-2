@@ -54,11 +54,9 @@ jobs:
         run: |
           echo "Logging into ServiceNow website at SNW_URL..."
 
-          # Step 1: GET the login page and save session cookies
           curl -s -c cookies.txt -o /dev/null -L "${{ secrets.SNW_URL }}"
           echo "Step 1 done: Retrieved login page and saved cookies."
 
-          # Step 2: POST login credentials to SNW_URL/login.do
           HTTP_STATUS=$(curl -s -o login_response.html -w "%{http_code}" \
             -c cookies.txt -b cookies.txt \
             -L \
@@ -81,9 +79,9 @@ jobs:
 
       - name: Wake ServiceNow Developer Instance via HTTP Request
         run: |
-          echo "Sending wake-up request to SN_INSTANCE_URL (developer instance)..."
+          echo "Sending wake-up request to SN_INSTANCE_URL..."
           curl -s -L -o /dev/null "${{ secrets.SN_INSTANCE_URL }}"
-          echo "Wake-up request sent to instance."
+          echo "Wake-up request sent."
 
       - name: Wait 10 Minutes for Instance to Boot
         run: |
@@ -107,70 +105,97 @@ jobs:
             echo "ERROR: 401 Unauthorized. Check SN_USERNAME and SN_PASSWORD secrets."
             exit 1
           elif [ "$HTTP_STATUS" = "000" ]; then
-            echo "WARNING: Instance not responding yet. It may still be waking up."
+            echo "WARNING: Instance not responding yet."
           else
-            echo "ServiceNow API reachable at SN_INSTANCE_URL. Status: $HTTP_STATUS"
+            echo "ServiceNow API reachable. Status: $HTTP_STATUS"
           fi
 
       - name: Create Task in ServiceNow
-        id: create_task
         run: |
-          PAYLOAD=$(cat <<EOF
-          {
-            "short_description": "GitHub Commit by ${{ github.actor }} on repo vkhere/Project-2",
-            "description": "Commit Details:\n- Author: ${{ github.actor }}\n- Branch: ${{ github.ref_name }}\n- Commit SHA: ${{ github.sha }}\n- Message: ${{ github.event.head_commit.message }}\n- Timestamp: ${{ github.event.head_commit.timestamp }}\n- Repository: https://github.com/vkhere/Project-2",
+          PAYLOAD=$(printf '{
+            "short_description": "GitHub Commit by %s on repo vkhere/Project-2",
+            "description": "Commit Details:\n- Author: %s\n- Branch: %s\n- Commit SHA: %s\n- Message: %s\n- Timestamp: %s\n- Repository: https://github.com/vkhere/Project-2",
             "state": "1"
-          }
-          EOF
-          )
+          }' \
+            "${{ github.actor }}" \
+            "${{ github.actor }}" \
+            "${{ github.ref_name }}" \
+            "${{ github.sha }}" \
+            "${{ github.event.head_commit.message }}" \
+            "${{ github.event.head_commit.timestamp }}")
 
-          RESPONSE=$(curl -s -L --post302 -w "\n%{http_code}" -X POST \
+          # POST to ServiceNow and save ONLY the body to task_response.json
+          curl -s -L --post302 -X POST \
             "${{ secrets.SN_INSTANCE_URL }}/api/now/table/task" \
             --user "${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}" \
             --header "Content-Type: application/json" \
             --header "Accept: application/json" \
-            --data "$PAYLOAD")
+            --output task_response.json \
+            --write-out "HTTP_STATUS:%{http_code}\n" \
+            --data "$PAYLOAD" | tee curl_status.txt
 
-          STATUS=$(echo "$RESPONSE" | tail -n 1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+          HTTP_STATUS=$(grep "HTTP_STATUS:" curl_status.txt | cut -d':' -f2 | tr -d '[:space:]')
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Raw Response:"
+          cat task_response.json
 
-          echo "HTTP Status: $STATUS"
-
-          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
-            echo "ERROR: Failed to create task in ServiceNow."
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "ERROR: Failed to create task. Status: $HTTP_STATUS"
             exit 1
           fi
 
-          # Save full response body to file for next step
-          echo "$BODY" > task_response.json
-          echo "task_status=$STATUS" >> $GITHUB_OUTPUT
           echo "SUCCESS: Task created in ServiceNow!"
 
       - name: Display Created Task Summary
         run: |
+          echo ""
           echo "=============================================="
-          echo "         SERVICENOW TASK CREATED SUMMARY"
+          echo "      SERVICENOW TASK CREATED SUMMARY"
           echo "=============================================="
 
-          # Parse task fields from saved JSON response
-          TASK_NUMBER=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('number','N/A'))")
-          TASK_SYSID=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('sys_id','N/A'))")
-          TASK_SHORT_DESC=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('short_description','N/A'))")
-          TASK_STATE=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('state','N/A'))")
-          TASK_CREATED=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('sys_created_on','N/A'))")
+          python3 << 'EOF'
+          import json, sys
+
+          try:
+              with open("task_response.json", "r") as f:
+                  content = f.read().strip()
+
+              if not content:
+                  print("WARNING: Response file is empty.")
+                  sys.exit(1)
+
+              data = json.loads(content)
+              result = data.get("result", {})
+
+              task_number   = result.get("number", "N/A")
+              task_sysid    = result.get("sys_id", "N/A")
+              task_desc     = result.get("short_description", "N/A")
+              task_state    = result.get("state", "N/A")
+              task_created  = result.get("sys_created_on", "N/A")
+              task_priority = result.get("priority", "N/A")
+
+              print(f"  Task Number   : {task_number}")
+              print(f"  Task Sys ID   : {task_sysid}")
+              print(f"  Description   : {task_desc}")
+              print(f"  State         : {task_state} (1 = Open)")
+              print(f"  Priority      : {task_priority}")
+              print(f"  Created On    : {task_created}")
+              print(f"  Direct Link   : ${{ secrets.SN_INSTANCE_URL }}/nav_to.do?uri=task.do?sys_id={task_sysid}")
+
+          except json.JSONDecodeError as e:
+              print(f"ERROR: Could not parse JSON response: {e}")
+              print("Raw content was:")
+              with open("task_response.json", "r") as f:
+                  print(f.read())
+              sys.exit(1)
+          EOF
 
           echo ""
-          echo "  Task Number   : $TASK_NUMBER"
-          echo "  Task Sys ID   : $TASK_SYSID"
-          echo "  Description   : $TASK_SHORT_DESC"
-          echo "  State         : $TASK_STATE (1 = Open)"
-          echo "  Created On    : $TASK_CREATED"
           echo "  Commit SHA    : ${{ github.sha }}"
           echo "  Branch        : ${{ github.ref_name }}"
           echo "  Author        : ${{ github.actor }}"
           echo "  Repository    : https://github.com/vkhere/Project-2"
-          echo "  Direct Link   : ${{ secrets.SN_INSTANCE_URL }}/nav_to.do?uri=task.do?sys_id=$TASK_SYSID"
           echo ""
           echo "=============================================="
-          echo "   Workflow completed successfully!"
+          echo "        Workflow completed successfully!"
           echo "=============================================="
