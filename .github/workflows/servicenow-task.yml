@@ -16,58 +16,104 @@ jobs:
 
       - name: Verify required secrets
         run: |
+          MISSING=0
+
           if [ -z "${{ secrets.SN_INSTANCE_URL }}" ]; then
             echo "ERROR: SN_INSTANCE_URL is missing"
-            exit 1
+            MISSING=1
           fi
-
           if [ -z "${{ secrets.SN_USERNAME }}" ]; then
             echo "ERROR: SN_USERNAME is missing"
-            exit 1
+            MISSING=1
           fi
-
           if [ -z "${{ secrets.SN_PASSWORD }}" ]; then
             echo "ERROR: SN_PASSWORD is missing"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.SNW_URL }}" ]; then
+            echo "ERROR: SNW_URL is missing"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.SNW_username }}" ]; then
+            echo "ERROR: SNW_username is missing"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.SNW_Password }}" ]; then
+            echo "ERROR: SNW_Password is missing"
+            MISSING=1
+          fi
+
+          if [ "$MISSING" = "1" ]; then
+            echo "One or more required secrets are missing. Aborting."
             exit 1
           fi
 
-          echo "All required secrets are present."
+          echo "All 6 required secrets are present."
 
-      - name: Verify ServiceNow Login
+      - name: Login to ServiceNow Website to Wake Up Instance
         run: |
-          echo "Testing ServiceNow authentication..."
+          echo "Logging into ServiceNow website at SNW_URL..."
+
+          # Step 1: GET the login page and save session cookies
+          curl -s -c cookies.txt -o /dev/null -L "${{ secrets.SNW_URL }}"
+          echo "Step 1 done: Retrieved login page and saved cookies."
+
+          # Step 2: POST login credentials to SNW_URL/login.do
+          HTTP_STATUS=$(curl -s -o login_response.html -w "%{http_code}" \
+            -c cookies.txt -b cookies.txt \
+            -L \
+            --data "user_name=${{ secrets.SNW_username }}" \
+            --data "user_password=${{ secrets.SNW_Password }}" \
+            --data "ni.nolog.user_password=true" \
+            --data "ni.noecho.user_name=true" \
+            --data "ni.noecho.user_password=true" \
+            --data "remember_me=true" \
+            --data "sys_action=sysverb_login" \
+            "${{ secrets.SNW_URL }}/login.do")
+
+          echo "Login HTTP Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ]; then
+            echo "Login to SNW_URL successful."
+          else
+            echo "WARNING: Unexpected login status: $HTTP_STATUS. Continuing anyway."
+          fi
+
+      - name: Wake ServiceNow Developer Instance via HTTP Request
+        run: |
+          echo "Sending wake-up request to SN_INSTANCE_URL (developer instance)..."
+          curl -s -L -o /dev/null "${{ secrets.SN_INSTANCE_URL }}"
+          echo "Wake-up request sent to instance."
+
+      - name: Wait 10 Minutes for Instance to Boot
+        run: |
+          echo "Waiting 600 seconds for ServiceNow developer instance to fully wake up..."
+          sleep 600
+          echo "Wait complete. Proceeding to API operations."
+
+      - name: Verify ServiceNow API Login
+        run: |
+          echo "Verifying REST API authentication against SN_INSTANCE_URL..."
           URL="${{ secrets.SN_INSTANCE_URL }}/api/now/table/task?sysparm_limit=1"
-          echo "Using instance: ${{ secrets.SN_INSTANCE_URL }}"
 
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             --user "${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}" \
             --header "Accept: application/json" \
             "$URL")
 
-          echo "HTTP Status: $HTTP_STATUS"
+          echo "API Auth HTTP Status: $HTTP_STATUS"
 
           if [ "$HTTP_STATUS" = "401" ]; then
-            echo "ERROR: 401 Unauthorized. Check SN_USERNAME and SN_PASSWORD."
+            echo "ERROR: 401 Unauthorized. Check SN_USERNAME and SN_PASSWORD secrets."
             exit 1
           elif [ "$HTTP_STATUS" = "000" ]; then
-            echo "Instance may be hibernating. Proceeding to wake-up."
+            echo "WARNING: Instance not responding yet. It may still be waking up."
           else
-            echo "ServiceNow reachable."
+            echo "ServiceNow API reachable at SN_INSTANCE_URL. Status: $HTTP_STATUS"
           fi
 
-      - name: Wake ServiceNow Instance
-        run: |
-          echo "Sending wake-up request..."
-          curl -s -L "${{ secrets.SN_INSTANCE_URL }}" > /dev/null
-          echo "Wake-up request sent."
-
-      - name: Wait 10 Minutes
-        run: |
-          echo "Waiting 600 seconds for ServiceNow to wake up..."
-          sleep 600
-          echo "Wait complete."
-
       - name: Create Task in ServiceNow
+        id: create_task
         run: |
           PAYLOAD=$(cat <<EOF
           {
@@ -78,7 +124,7 @@ jobs:
           EOF
           )
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          RESPONSE=$(curl -s -L --post302 -w "\n%{http_code}" -X POST \
             "${{ secrets.SN_INSTANCE_URL }}/api/now/table/task" \
             --user "${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}" \
             --header "Content-Type: application/json" \
@@ -89,11 +135,42 @@ jobs:
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           echo "HTTP Status: $STATUS"
-          echo "Response Body: $BODY"
 
           if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
             echo "ERROR: Failed to create task in ServiceNow."
             exit 1
           fi
 
-          echo "SUCCESS: Task created in ServiceNow."
+          # Save full response body to file for next step
+          echo "$BODY" > task_response.json
+          echo "task_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "SUCCESS: Task created in ServiceNow!"
+
+      - name: Display Created Task Summary
+        run: |
+          echo "=============================================="
+          echo "         SERVICENOW TASK CREATED SUMMARY"
+          echo "=============================================="
+
+          # Parse task fields from saved JSON response
+          TASK_NUMBER=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('number','N/A'))")
+          TASK_SYSID=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('sys_id','N/A'))")
+          TASK_SHORT_DESC=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('short_description','N/A'))")
+          TASK_STATE=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('state','N/A'))")
+          TASK_CREATED=$(cat task_response.json | python3 -c "import sys,json; d=json.load(sys.stdin).get('result',{}); print(d.get('sys_created_on','N/A'))")
+
+          echo ""
+          echo "  Task Number   : $TASK_NUMBER"
+          echo "  Task Sys ID   : $TASK_SYSID"
+          echo "  Description   : $TASK_SHORT_DESC"
+          echo "  State         : $TASK_STATE (1 = Open)"
+          echo "  Created On    : $TASK_CREATED"
+          echo "  Commit SHA    : ${{ github.sha }}"
+          echo "  Branch        : ${{ github.ref_name }}"
+          echo "  Author        : ${{ github.actor }}"
+          echo "  Repository    : https://github.com/vkhere/Project-2"
+          echo "  Direct Link   : ${{ secrets.SN_INSTANCE_URL }}/nav_to.do?uri=task.do?sys_id=$TASK_SYSID"
+          echo ""
+          echo "=============================================="
+          echo "   Workflow completed successfully!"
+          echo "=============================================="
