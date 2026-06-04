@@ -1,0 +1,17 @@
+indicator,type,context,confidence,source
+10.4.30.101,client IP,workstation,high,2018-04-30 Trickbot
+10.4.30.5,dc IP,domain controller,high,2018-04-30 Trickbot
+interbanx.co.id,domain,payload delivery,high,2018-04-30 Trickbot
+api.ipify.org,domain,external IP lookup,high,2018-04-30 Trickbot
+ip.anysrc.net,domain,external IP lookup,high,2018-04-30 Trickbot
+37.228.70.134,c2 IP,beaconing,high,2021-05-26 Cobalt Strike
+36.95.27.243,c2 IP,exfil endpoint,high,2021-05-26 Cobalt Strike
+103.102.220.50,c2 IP,exfil endpoint,high,2021-05-26 Cobalt Strike
+5.199.162.3,c2 IP,bulk exfil endpoint,high,2021-05-26 Cobalt Strike
+109.95.114.28,c2 IP,beaconing,high,2018-04-30 Trickbot
+82.146.61.180,c2 IP,beaconing,high,2018-04-30 Trickbot
+95.213.200.40,c2 IP,beaconing,high,2018-04-30 Trickbot
+185.228.233.185,c2 IP,beaconing,high,2018-04-30 Trickbot
+46.161.39.175,module server IP,module staging,high,2018-04-30 Trickbot
+78.155.206.55,c2 IP,beaconing,high,2018-04-30 Trickbot
+185.228.232.218,c2 IP,beaconing,high,2018-04-30 Trickbot
