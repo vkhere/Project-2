@@ -1,0 +1,5 @@
+| Threat Card | Category (OWASP / Theme)                 | Rationale for Priority                               |
+| ----------- | ---------------------------------------- | ---------------------------------------------------- |
+| C1          | A01 Broken Access / Data breach          | Direct impact on PII and stored card data            |
+| C2          | A01 Business logic / integrity           | Enables revenue-impacting fraud via price abuse      |
+| C3          | A03 Injection                            | Path to backend data dump or tampering               |
